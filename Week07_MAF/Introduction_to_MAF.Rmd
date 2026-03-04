@@ -1,0 +1,142 @@
+Ashton Ancheta
+---
+title: "Introduction to MAF"
+author: Erika Li, Jeanne Revilla, Mahija Mogalipuvvu, adapted from Nicole Black, Wade Boohar
+date: 07/17/22
+updated: 9/29/2025
+---
+
+***Deliverables***
+- upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace
+- include ALL graphs or figures created in this assignment in a folder with your R notebook with descriptive file names.
+
+We encourage you to work with a partner. Therefore, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In this assignment, you will need to use your skills learned in class to demonstrate your understanding of categorical variables and R data structures.
+
+*Pre-Assignment*
+Load all necessary packages, read in the clinical data.csv file you have in your analysis_data folder, and instantiate the MAF_object.
+```{r}
+knitr::opts_knit$set(root.dir = normalizePath("/home1/aganchet/490_cluster/analysis_data")) 
+
+if (!require("knitr", quietly = TRUE))
+install.packages("knitr")
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(version = "3.21")
+if (!require("TCGAbiolinks", quietly = TRUE))
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+BiocManager::install("maftools")
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+clinical <- read.csv("/home1/aganchet/490_cluster/analysis_data/brca_clinical_data.csv")
+colnames(clinical)[ colnames(clinical) == "barcode" ] <- "Tumor_Sample_Barcode"
+clin_query <- GDCquery(project = "TCGA-BRCA", data.category = "Clinical",
+data.type = "Clinical Supplement", data.format = 'BCR Biotab')
+
+#GDCdownload(maf_query, method = "api", files.per.chunk = 100)
+maf_query <- GDCquery(
+project = "TCGA-BRCA",
+data.category = "Simple Nucleotide Variation",
+access = "open",
+data.type = "Masked Somatic Mutation",
+workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking")
+
+
+maf <- GDCprepare(maf_query)
+maf_object <- read.maf(maf = maf,
+clinicalData = clinical,
+isTCGA = TRUE)
+
+```
+```
+
+It's useful to save your MAF_object, so that you don't have to go through the trouble of querying and preparing it everytime. The saveRDS function allows us to save an R object, allowing us to access it directly from our files. 
+```{r}
+saveRDS(maf_object, file = "/home1/aganchet/490_cluster/analysis_data/maf_object.rds")
+# ex. saveRDS(MAF_object, file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+```
+
+When you reopen a new R session and want to access your MAF_object, you can use the readRDS function to load the object back into a new variable.
+```{r}
+MAF_object <- readRDS(file = "/home1/aganchet/490_cluster/analysis_data/maf_object.rds")
+# ex. MAF_object <- readRDS(file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+```
+
+*1*
+Choose a clinical variable (or any variable from clin_rad or clin_drug) to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
+```{r}
+head(MAF_object@data)
+
+MAF_object@clinical.data$age_category <- ifelse(MAF_object@clinical.data$age_at_diagnosis <= 40, "Young","Old")
+
+
+
+
+
+```
+
+
+*2*
+Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
+Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+```{r}
+Young_people <- MAF_object@clinical.data$Tumor_Sample_Barcode[MAF_object@clinical.data$age_category == "Young"]
+Old_people <- MAF_object@clinical.data$Tumor_Sample_Barcode[MAF_object@clinical.data$age_category == "Old"]
+MAF_young = subsetMaf(maf = MAF_object, tsb = Young_people)
+MAF_old = subsetMaf(maf = MAF_object, tsb = Old_people)
+
+coOncoplot(m1 = MAF_young, m2 = MAF_old, m1Name = "Young, <=40", m2Name = "Old > 40")
+
+#For young people 40 or under, 2% have mutated CDH1, while for old people its a higher 14%
+
+#CDH1 is classified as a tumor supressor gene and its mutation is often correlated wioth the lobular form of breast cancer. This more agressive form of breast cancer has an onset age average of 55, and is rarely detetced in Women under 40. This could explain why there is a higher frequency of this mutation in the "old" group as this is where the average age of detection lies.
+```
+
+
+*3*
+Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
+Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+```{r}
+CDH1_maf <- subsetMaf(maf = MAF_object, genes = "CDH1")
+Mutation_presence <- ifelse(MAF_object@clinical.data$Tumor_Sample_Barcode %in% CDH1_maf@clinical.data$Tumor_Sample_Barcode, "mutation", "no mutation")
+length(Mutation_presence)
+length(CDH1_maf@clinical.data$age_category)
+ContigencyTable_CDH1 <- table(Mutation_presence,MAF_object@clinical.data$age_category )
+print(ContigencyTable_CDH1)
+fisher.test(ContigencyTable_CDH1)
+
+#Fishers test tell us that the old population (above the age of 40), has odds of the CDH1 mutation being present that is 7.2X greater then that of the young group. We can regect the null hypothesis that there is no statisticaly signifanct difference of the presence of a CDH1 mutation in the young and old group as we have a p-value of 0.004
+
+
+#*4*
+#Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot. Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+
+```{r}
+lollipopPlot2(m1 = MAF_young, m1_name= "Young (<=40)", m2 = MAF_old, m2_name = "Old (>40)", gene = "CDH1")
+
+
+#Since the young group only has 2 CDH1 mutations present, it is difficult to make any comparison between the young and old group in terms of sites, types, and number of mutations. 
+
+```
+
+
+*5*
+Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
+Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
+```{r}
+MAF_object@clinical.data$Overall_Survival_Status <- ifelse(MAF_object@clinical.data$vital_status == "Alive", T, F)
+mafSurvival(maf = MAF_object,
+genes= "CDH1",
+time = "last_contact_days_to",
+Status = "Overall_Survival_Status", 
+isTCGA = TRUE) 
+
+
+#There does not appear to be any difference in survival rate for breast cancer between the mutant CDH1 and wild type form of this gene. There is a very high p value of 0.834. This makes sense as outside research indicated that CDH1 is correlated with Invasive Lobular Carcinoma which is not necessarily more aggressive than other forms of breast cancer. Analysis of the TCGA data shows contributes to this hypothesis as the mutation is primarily found in the old group, indicating that it is associated with a specific subtype of breast cancer more commonly found in older patients. 
+
